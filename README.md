@@ -1,22 +1,35 @@
-### Preparing Videos and decode to images
-### Transcode & Take out 10 min video sample (Optional)
+# YOLOv2 & YOLOv3 for Consecutive Video Streams
+
+##### Requires: 
+* **Linux GCC>=4.9**
+* **CUDA >= 7.5**
+* **CuDNN >= 5.1**
+* **OpenCV 3.3.0**
+* **ffmpeg (with NVIDIA Support)**: https://developer.nvidia.com/ffmpeg
+
+### Build
+```
+$ export PATH=/usr/local/cuda-8.0/bin${PATH:+:${PATH}} 
+$ export LD_LIBRARY_PATH=/usr/local/cuda8.0/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
+$ make
+```
+
+### Video Preparation
+Preparing Videos and decode to images: Transcode to 608x608 & Take out 10 min video sample (Optional)
 ```
 $ ffmpeg -c:v h264_cuvid -i input.mp4 -ss 00:00:00 -t 00:10:00 -vf scale=608:608 -c:v h264_nvenc output.mp4
 ```
 
-### Decode to images
+### Image Generation
+Decode and save as images, with filenames defined in frame sequences
 ```
 $ ffmpeg -i input.mp4 ./path/to/images/%7d.jpg 
 ```
-
-### Generate filename lists, and the text file will be in ./data/train.txt:
-### Remember to change path to images in generate-name.py
+Generate filename lists, and the text file will be in ./data/train.txt; Remember to change path to images in generate-name.py
 ```
 $ python genearte-name.py
 ```
-
 ### Run it!
-### https://github.com/pjreddie/darknet/issues/723
 ### Can change to all availble cfg under./cfg
 ```
 $ ./darknet detector test cfg/imagenet22k.dataset cfg/yolov3.cfg yolov3.weights -dont_show -ext_output < data/train.txt > result.txt

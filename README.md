@@ -32,8 +32,9 @@ Generate filename lists, and the text file will be in ./data/train.txt; Remember
 ```
 $ python genearte-name.py
 ```
+
 ### Run it!
-### Can change to all availble cfg under./cfg
+Note: Can change to all availble cfg under./cfg
 ```
 $ ./darknet detector test cfg/imagenet22k.dataset cfg/yolov3.cfg yolov3.weights -dont_show -ext_output < data/train.txt > result.txt
 ```

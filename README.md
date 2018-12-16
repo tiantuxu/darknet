@@ -1,6 +1,6 @@
 # YOLOv2 & YOLOv3 for Consecutive Video Streams
 
-##### Requires: 
+### Requiremets: 
 * **Linux GCC>=4.9**
 * **CUDA >= 7.5**
 * **CuDNN >= 5.1**
@@ -13,6 +13,9 @@ $ export PATH=/usr/local/cuda-8.0/bin${PATH:+:${PATH}}
 $ export LD_LIBRARY_PATH=/usr/local/cuda8.0/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 $ make
 ```
+### Get YOLO weights
+Download [YOLOv2](https://pjreddie.com/media/files/yolov2.weights) or
+[YOLOv3](https://pjreddie.com/media/files/yolov3.weights) weights
 
 ### Video Preparation
 Preparing Videos and decode to images: Transcode to 608x608 & Take out 10 min video sample (Optional)

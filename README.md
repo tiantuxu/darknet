@@ -45,4 +45,5 @@ Inference results is in result.txt
 /path/to/image/0000001.jpg OB2
 /path/to/image/0000003.jpg OB3
 /path/to/image/0000005.jpg OB4
+...
 ```

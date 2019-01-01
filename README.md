@@ -40,10 +40,10 @@ $ ./darknet detector test cfg/imagenet22k.dataset cfg/yolov3.cfg yolov3.weights 
 ```
 Inference results is in result.txt
 ```
-/path/to/image/0000000.jpg OB1
-/path/to/image/0000000.jpg OB2
-/path/to/image/0000001.jpg OB2
-/path/to/image/0000003.jpg OB3
-/path/to/image/0000005.jpg OB4
+/path/to/image/0000000.jpg,OB1,97%
+/path/to/image/0000000.jpg,OB2,90%
+/path/to/image/0000001.jpg,OB2,88%
+/path/to/image/0000003.jpg,OB3,96%
+/path/to/image/0000005.jpg,OB4,89%
 ...
 ```

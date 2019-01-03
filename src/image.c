@@ -1016,8 +1016,144 @@ void show_image(image p, const char *name)
 #endif
 }
 
-/* xzl: lmdb */
-image
+
+#include <lmdb.h>
+
+/* xzl: lmdb
+ * @env: out. to be allocated
+ * @dbi: out
+ * return: 0 on success
+ */
+int db_open(const char* db_path, MDB_env** env, MDB_dbi* dbi)
+{
+	int rc;
+	xzl_bug_on(!db_path || !dbi);
+
+	MDB_txn *txn;
+
+	rc = mdb_env_create(&env);
+	xzl_bug_on(rc != 0);
+
+	rc = mdb_env_set_mapsize(env, 1UL * 1024UL * 1024UL * 1024UL); /* 1 GiB */
+	xzl_bug_on(rc != 0);
+
+	rc = mdb_env_open(env, db_path, 0, 0664);
+	xzl_bug_on(rc != 0);
+
+	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	xzl_bug_on(rc != 0);
+
+	rc = mdb_dbi_open(txn, NULL, MDB_INTEGERKEY, dbi);
+	xzl_bug_on(rc != 0);
+
+	mdb_txn_commit(txn); /* done open the db */
+
+	return 0;
+}
+
+void db_close(MDB_env* env, MDB_dbi dbi)
+{
+	xzl_bug_on(!env);
+
+	mdb_dbi_close(env, dbi);
+	mdb_env_close(env);
+}
+
+#define KEY_W	(MAX_SIZE - 1)
+#define KEY_H	(MAX_SIZE - 2)
+#define KEY_C	(MAX_SIZE - 3)
+
+void db_get_geometry(MDB_env* env, MDB_dbi dbi, int *w, int *h, int *c)
+{
+	xzl_bug_on(!env);
+
+	MDB_txn *txn;
+	MDB_val key, v;
+	int keysize = sizeof(size_t);
+	int rc;
+
+	key.mv_size = keysize;
+	key.mv_data = malloc(keysize);
+
+	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	xzl_bug_on(rc != 0);
+
+//	snprintf((char *)key.mv_data, keysize, "width-key");
+	*(size_t *)key.mv_data = KEY_W;
+	rc = mdb_get(&txn, dbi, &key, &v);
+	xzl_assert(rc == 0 && v.mv_size == sizeof(int));
+	*w = *(int *)(v.mv_data);
+
+//	snprintf((char *)key.mv_data, keysize, "height-key");
+	*(size_t *)key.mv_data = KEY_H;
+	rc = mdb_get(&txn, dbi, &key, &v);
+	xzl_assert(rc == 0 && v.mv_size == sizeof(int));
+	*h = *(int *)(v.mv_data);
+
+//	snprintf((char *)key.mv_data, keysize, "channel-key");
+	*(size_t *)key.mv_data = KEY_C;
+	rc = mdb_get(&txn, dbi, &key, &v);
+	xzl_assert(rc == 0 && v.mv_size == sizeof(int));
+	*c = *(int *)(v.mv_data);
+
+	return;
+}
+
+image db_loadnext_img(MDB_env* env, MDB_dbi dbi, int w, int h, int c)
+{
+	xzl_bug_on(!env);
+
+	MDB_txn *txn;
+	MDB_val key, v;
+	MDB_cursor *cursor;
+	MDB_cursor_op op;
+	int rc;
+	int frame_size = w * h * 3; /* assuming pixfmt rgb24 */
+
+	xzl_bug_on_msg(c != 3, "unsupported");
+
+	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	xzl_bug_on(rc != 0);
+	if(rc != 0){
+		I("rc = %d", rc);
+		I("%s",mdb_strerror(rc));
+	}
+
+	rc = mdb_cursor_open(txn, dbi, &cursor);
+	xzl_bug_on(rc != 0);
+
+	rc = mdb_cursor_get(cursor, &key, &v, MDB_NEXT);
+	if (rc == MDB_NOTFOUND) {
+		mdb_cursor_close(cursor);
+		mdb_txn_abort(txn);
+		return make_empty_image(w, h, c); /* nullptr within */
+	}
+
+	I("loaded one k/v. key: %lu, sz %zu data sz %zu",
+		*(uint64_t *)key.mv_data, key.mv_size,
+		v.mv_size);
+
+	xzl_assert(v.mv_size == frame_size);
+
+	image out = make_image(w, h, c);
+	unsigned char *data = (unsigned char *)v.mv_data;
+
+	/* cf: ipl_to_image() below */
+    int i, j, k, count=0;
+    int step = w * c; /* size (in byte) of each row */
+    for(k= 0; k < c; ++k){
+        for(i = 0; i < h; ++i){
+            for(j = 0; j < w; ++j){
+                out.data[count++] = data[i*step + j*c + k]/255.;
+            }
+        }
+    }
+
+	mdb_cursor_close(cursor);
+	mdb_txn_abort(txn);
+
+    return out;
+}
 
 #ifdef OPENCV
 

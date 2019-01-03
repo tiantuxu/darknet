@@ -1214,11 +1214,18 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
     char *input = buff;
     int j;
     float nms=.45;    // 0.4F
+
+    MDB_env *env; /* db env */
+    MDB_dbi dbi; /* db handle */
+    int _w = -1, _h, _c; /* frame size as loaded from db */
+
     while(1){
         if(filename){ /* xzl: a specific file name is given on cmdline */
+#if 1
             strncpy(input, filename, 256);
             if(strlen(input) > 0)
                 if (input[strlen(input) - 1] == 0x0d) input[strlen(input) - 1] = 0;
+#endif
         } else { /* xzl: no file specified on cmdline */
         		// teddyxu: remove
             /* printf("Enter Image Path: "); */
@@ -1228,7 +1235,20 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
             strtok(input, "\n");
         }
 
+        /* take a db path and open */
+		db_open(input, &env, &dbi);
+		if (_w < 0) /* once */
+			db_get_geometry(env, dbi, &_w, &_h, &_c);
+
+		image im = db_loadnext_img(env, dbi, _w, _h, _c);
+		if (!im.data) { /* nothing loaded. we done? */
+			db_close(env, dbi);
+			break;
+		}
+#if 0
         image im = load_image(input,0,0,net.c); /* xzl: @input: filename */
+#endif
+
         int letterbox = 0;
         image sized = resize_image(im, net.w, net.h);
         //image sized = letterbox_image(im, net.w, net.h); letterbox = 1;

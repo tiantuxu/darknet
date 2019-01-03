@@ -1245,6 +1245,8 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         //network_predict_image(&net, im); letterbox = 1;
 		// teddyxu: remove
         /* printf("%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000); */
+	// xzl:
+        fprintf(stderr, "%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000);
         // printf("%s: Predicted in %f seconds.\n", input, (what_time_is_it_now()-time));
 		// printf("%s", input);
         int nboxes = 0;

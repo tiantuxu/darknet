@@ -1016,8 +1016,12 @@ void show_image(image p, const char *name)
 #endif
 }
 
+/* xzl: lmdb */
+image
+
 #ifdef OPENCV
 
+/* xzl: useful -- conversion */
 image ipl_to_image(IplImage* src)
 {
     unsigned char *data = (unsigned char *)src->imageData;
@@ -1038,6 +1042,7 @@ image ipl_to_image(IplImage* src)
     return out;
 }
 
+/* xzl: IplImage is cv's internal image representation */
 image load_image_cv(char *filename, int channels)
 {
     IplImage* src = 0;
@@ -1049,7 +1054,7 @@ image load_image_cv(char *filename, int channels)
         fprintf(stderr, "OpenCV can't force load with %d channels\n", channels);
     }
 
-    if( (src = cvLoadImage(filename, flag)) == 0 )
+    if( (src = cvLoadImage(filename, flag)) == 0 ) /* xzl: img load fails */
     {
         char shrinked_filename[1024];
         if (strlen(filename) >= 1024) sprintf(shrinked_filename, "name is too long");
@@ -1927,6 +1932,7 @@ image load_image_stb(char *filename, int channels)
     return im;
 }
 
+/* xzl: @c: expected channel count */
 image load_image(char *filename, int w, int h, int c)
 {
 #ifdef OPENCV
@@ -1939,7 +1945,7 @@ image load_image(char *filename, int w, int h, int c)
 #endif
 
 #else
-    image out = load_image_stb(filename, c);    // without OpenCV
+    image out = load_image_stb(filename, c);    // without OpenCV. xzl: fallback to stb impl.
 #endif
 
     if((h && w) && (h != out.h || w != out.w)){

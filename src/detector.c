@@ -1215,19 +1215,20 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
     int j;
     float nms=.45;    // 0.4F
     while(1){
-        if(filename){
+        if(filename){ /* xzl: a specific file name is given on cmdline */
             strncpy(input, filename, 256);
             if(strlen(input) > 0)
                 if (input[strlen(input) - 1] == 0x0d) input[strlen(input) - 1] = 0;
-        } else {
-			// teddyxu: remove
+        } else { /* xzl: no file specified on cmdline */
+        		// teddyxu: remove
             /* printf("Enter Image Path: "); */
             fflush(stdout);
             input = fgets(input, 256, stdin);
             if(!input) return;
             strtok(input, "\n");
         }
-        image im = load_image(input,0,0,net.c);
+
+        image im = load_image(input,0,0,net.c); /* xzl: @input: filename */
         int letterbox = 0;
         image sized = resize_image(im, net.w, net.h);
         //image sized = letterbox_image(im, net.w, net.h); letterbox = 1;
@@ -1243,12 +1244,12 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         double time = get_time_point();
         network_predict(net, X);
         //network_predict_image(&net, im); letterbox = 1;
-		// teddyxu: remove
+        // teddyxu: remove
         /* printf("%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000); */
-	// xzl:
+        // xzl:
         fprintf(stderr, "%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000);
         // printf("%s: Predicted in %f seconds.\n", input, (what_time_is_it_now()-time));
-		// printf("%s", input);
+        // printf("%s", input);
         int nboxes = 0;
         detection *dets = get_network_boxes(&net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes, letterbox);
         if (nms) do_nms_sort(dets, nboxes, l.classes, nms);

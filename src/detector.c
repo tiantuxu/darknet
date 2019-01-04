@@ -31,6 +31,10 @@ void draw_train_loss(IplImage* img, int img_size, float avg_loss, float max_img_
 #define CV_RGB(r, g, b) cvScalar( (b), (g), (r), 0 )
 #endif    // OPENCV
 
+/* xzl */
+#include <lmdb.h>
+#include "log.h"
+
 #include "http_stream.h"
 
 int check_mistakes;
@@ -1209,15 +1213,19 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         if(net.layers[net.n - 1].classes > names_size) getchar();
     }
     srand(2222222);
-    double time;
-    char buff[256];
-    char *input = buff;
+    char buff[256], buff1[256];
+    char *input = buff, *input_frame = buff1;
     int j;
     float nms=.45;    // 0.4F
 
-    MDB_env *env; /* db env */
+    MDB_env *env = NULL; /* db env */
     MDB_dbi dbi; /* db handle */
+    MDB_txn *txn = NULL; /* one transcation for all reads, becuase we iterate with a cursor */
+    MDB_cursor *cursor = NULL;
+
     int _w = -1, _h, _c; /* frame size as loaded from db */
+    double start_time = what_time_is_it_now(); /* measure total time */
+    size_t count = 0;
 
     while(1){
         if(filename){ /* xzl: a specific file name is given on cmdline */
@@ -1235,16 +1243,28 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
             strtok(input, "\n");
         }
 
-        /* take a db path and open */
-		db_open(input, &env, &dbi);
-		if (_w < 0) /* once */
+    		/* take a db path and open it */
+        if (!env) { /* once */
+        	db_open(input, &env, &dbi);
 			db_get_geometry(env, dbi, &_w, &_h, &_c);
+			W("db: loaded w/h/c = %d %d %d", _w, _h, _c);
+    	}
 
-		image im = db_loadnext_img(env, dbi, _w, _h, _c);
-		if (!im.data) { /* nothing loaded. we done? */
-			db_close(env, dbi);
-			break;
+			image im = db_loadnext_img(env, dbi, &txn, &cursor, _w, _h, _c);
+
+			if (!im.data) { /* nothing loaded. we done. */
+				W("all done");
+				fprintf(stderr, "%lu in %f seconds. fps=%.2f\n",
+						count, (what_time_is_it_now()-start_time),
+						count / (what_time_is_it_now()-start_time));
+
+				if (txn) mdb_txn_abort(txn);	// xzl: why segfault?
+				db_close(env, dbi);
+				break;
 		}
+
+		count ++;
+
 #if 0
         image im = load_image(input,0,0,net.c); /* xzl: @input: filename */
 #endif
@@ -1261,19 +1281,18 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         float *X = sized.data;
 
         //time= what_time_is_it_now();
-        double time = get_time_point();
+//        double time = get_time_point();
         network_predict(net, X);
         //network_predict_image(&net, im); letterbox = 1;
-        // teddyxu: remove
-        /* printf("%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000); */
         // xzl:
-        fprintf(stderr, "%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000);
+//        fprintf(stderr, "%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000);
         // printf("%s: Predicted in %f seconds.\n", input, (what_time_is_it_now()-time));
         // printf("%s", input);
         int nboxes = 0;
         detection *dets = get_network_boxes(&net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes, letterbox);
         if (nms) do_nms_sort(dets, nboxes, l.classes, nms);
-        draw_detections_v3(im, dets, nboxes, thresh, names, alphabet, l.classes, ext_output, input);
+        snprintf(input_frame, 256, "%s-%d", input, count); // xzl
+        draw_detections_v3(im, dets, nboxes, thresh, names, alphabet, l.classes, ext_output, input_frame);
         save_image(im, "predictions");
         if (!dont_show) {
             show_image(im, "predictions");
@@ -1306,7 +1325,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         }
 
         free_detections(dets, nboxes);
-        free_image(im);
+        free_image(im); /* xzl: reuse this? XXX */
         free_image(sized);
         //free(boxes);
         //free_ptrs((void **)probs, l.w*l.h*l.n);
@@ -1316,7 +1335,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
             cvDestroyAllWindows();
         }
 #endif
-        if (filename) break;
+        /* if (filename) break; */ /* xzl: dont break. go on */
     }
 
     // free memory

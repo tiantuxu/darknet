@@ -1,0 +1,37 @@
+# To build db, example commands
+
+input=/home/xzl/videos/jackson.mp4
+raw_output=/tmp/input.rgb
+db_path=/tmp/db
+
+ffmpeg \
+-c:v h264_cuvid \
+-i ${input} -c:v rawvideo \
+-pix_fmt rgb24 \
+-r 0.1 \
+-vf scale=100:100 \
+${raw_output}
+
+# validate the raw file
+ffplay \
+-f rawvideo \
+-pix_fmt rgb24 \
+-s 100x100 \
+-i ${raw_output}
+
+# build a db out of the raw file
+./test-db-build.bin -r -v /media/xzl/WD-BLK-1TB/raw-100x100-rgb24.rgb -d ${dbpath} \
+-w 100 -h 100
+
+# run darknet over lmdb 
+./darknet detector test cfg/coco.data cfg/yolov3.cfg yolov3.weights \
+-dont_show -ext_output \
+${db_path}
+
+# watch GPU usage
+# pip install gpustat
+watch gpustat -cp
+
+KNOWN ISSUE
+will segfault at the end of the program execution. shouldn't affect correctness though. 
+fix later.

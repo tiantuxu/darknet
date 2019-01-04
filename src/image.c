@@ -25,6 +25,8 @@
 #define CV_RGB(r, g, b) cvScalar( (b), (g), (r), 0 )
 #endif
 
+#include "log.h" /* xzl */
+
 extern int check_mistakes;
 int windows = 0;
 
@@ -1016,9 +1018,6 @@ void show_image(image p, const char *name)
 #endif
 }
 
-
-#include <lmdb.h>
-
 /* xzl: lmdb
  * @env: out. to be allocated
  * @dbi: out
@@ -1031,16 +1030,16 @@ int db_open(const char* db_path, MDB_env** env, MDB_dbi* dbi)
 
 	MDB_txn *txn;
 
-	rc = mdb_env_create(&env);
+	rc = mdb_env_create(env);
 	xzl_bug_on(rc != 0);
 
-	rc = mdb_env_set_mapsize(env, 1UL * 1024UL * 1024UL * 1024UL); /* 1 GiB */
+	rc = mdb_env_set_mapsize(*env, 1UL * 1024UL * 1024UL * 1024UL); /* 1 GiB */
 	xzl_bug_on(rc != 0);
 
-	rc = mdb_env_open(env, db_path, 0, 0664);
+	rc = mdb_env_open(*env, db_path, 0, 0664);
 	xzl_bug_on(rc != 0);
 
-	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+	rc = mdb_txn_begin(*env, NULL, MDB_RDONLY, &txn);
 	xzl_bug_on(rc != 0);
 
 	rc = mdb_dbi_open(txn, NULL, MDB_INTEGERKEY, dbi);
@@ -1059,10 +1058,6 @@ void db_close(MDB_env* env, MDB_dbi dbi)
 	mdb_env_close(env);
 }
 
-#define KEY_W	(MAX_SIZE - 1)
-#define KEY_H	(MAX_SIZE - 2)
-#define KEY_C	(MAX_SIZE - 3)
-
 void db_get_geometry(MDB_env* env, MDB_dbi dbi, int *w, int *h, int *c)
 {
 	xzl_bug_on(!env);
@@ -1070,63 +1065,80 @@ void db_get_geometry(MDB_env* env, MDB_dbi dbi, int *w, int *h, int *c)
 	MDB_txn *txn;
 	MDB_val key, v;
 	int keysize = sizeof(size_t);
+	size_t kk;
 	int rc;
 
+	key.mv_data = &kk;
 	key.mv_size = keysize;
-	key.mv_data = malloc(keysize);
 
 	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
 	xzl_bug_on(rc != 0);
 
 //	snprintf((char *)key.mv_data, keysize, "width-key");
-	*(size_t *)key.mv_data = KEY_W;
-	rc = mdb_get(&txn, dbi, &key, &v);
+	kk = KEY_W;
+	rc = mdb_get(txn, dbi, &key, &v);
+	if(rc != 0){
+		EE("rc = %d", rc); EE("%s",mdb_strerror(rc));
+	}
 	xzl_assert(rc == 0 && v.mv_size == sizeof(int));
 	*w = *(int *)(v.mv_data);
 
 //	snprintf((char *)key.mv_data, keysize, "height-key");
-	*(size_t *)key.mv_data = KEY_H;
-	rc = mdb_get(&txn, dbi, &key, &v);
+	kk = KEY_H;
+	rc = mdb_get(txn, dbi, &key, &v);
 	xzl_assert(rc == 0 && v.mv_size == sizeof(int));
 	*h = *(int *)(v.mv_data);
 
 //	snprintf((char *)key.mv_data, keysize, "channel-key");
-	*(size_t *)key.mv_data = KEY_C;
-	rc = mdb_get(&txn, dbi, &key, &v);
+	kk = KEY_C;
+	rc = mdb_get(txn, dbi, &key, &v);
 	xzl_assert(rc == 0 && v.mv_size == sizeof(int));
 	*c = *(int *)(v.mv_data);
+
+	mdb_txn_abort(txn);
 
 	return;
 }
 
-image db_loadnext_img(MDB_env* env, MDB_dbi dbi, int w, int h, int c)
+/* @cursor: in/out. if nullptr, will create a new cursor */
+image db_loadnext_img(MDB_env* env, MDB_dbi dbi, MDB_txn **txn,
+		MDB_cursor **cursor, int w, int h, int c)
 {
 	xzl_bug_on(!env);
 
-	MDB_txn *txn;
 	MDB_val key, v;
-	MDB_cursor *cursor;
-	MDB_cursor_op op;
+//	MDB_cursor_op op;
 	int rc;
 	int frame_size = w * h * 3; /* assuming pixfmt rgb24 */
 
 	xzl_bug_on_msg(c != 3, "unsupported");
 
-	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
-	xzl_bug_on(rc != 0);
-	if(rc != 0){
-		I("rc = %d", rc);
-		I("%s",mdb_strerror(rc));
+	if (!*txn) {
+		rc = mdb_txn_begin(env, NULL, MDB_RDONLY, txn);
+		if(rc != 0){
+			EE("rc = %d", rc);
+			EE("%s",mdb_strerror(rc));
+		}
+		xzl_bug_on(rc != 0);
 	}
 
-	rc = mdb_cursor_open(txn, dbi, &cursor);
-	xzl_bug_on(rc != 0);
+try_again:
+	if (!*cursor) {
+		rc = mdb_cursor_open(*txn, dbi, cursor);
+		xzl_bug_on(rc != 0);
+		rc = mdb_cursor_get(*cursor, &key, &v, MDB_FIRST);
+	} else
+		rc = mdb_cursor_get(*cursor, &key, &v, MDB_NEXT);
 
-	rc = mdb_cursor_get(cursor, &key, &v, MDB_NEXT);
 	if (rc == MDB_NOTFOUND) {
-		mdb_cursor_close(cursor);
-		mdb_txn_abort(txn);
+		mdb_cursor_close(*cursor);
+		mdb_txn_abort(*txn);
 		return make_empty_image(w, h, c); /* nullptr within */
+	}
+
+	if (v.mv_size == sizeof(int)) {
+		I("hit a w/h/c. continue..");
+		goto try_again;
 	}
 
 	I("loaded one k/v. key: %lu, sz %zu data sz %zu",
@@ -1149,10 +1161,9 @@ image db_loadnext_img(MDB_env* env, MDB_dbi dbi, int w, int h, int c)
         }
     }
 
-	mdb_cursor_close(cursor);
-	mdb_txn_abort(txn);
+    /* leaving @cursor and @txn open for next call */
 
-    return out;
+	return out;
 }
 
 #ifdef OPENCV

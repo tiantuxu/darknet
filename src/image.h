@@ -15,6 +15,21 @@ typedef struct {
     float *data;
 } image;
 
+/* xzl: for lmdb */
+#include <lmdb.h>
+
+#define KEY_W	(0)
+#define KEY_H	(1)
+#define KEY_C	(2)
+#define KEY_START	(KEY_C + 1)
+
+int db_open(const char* db_path, MDB_env** env, MDB_dbi* dbi);
+void db_close(MDB_env* env, MDB_dbi dbi);
+void db_get_geometry(MDB_env* env, MDB_dbi dbi, int *w, int *h, int *c);
+image db_loadnext_img(MDB_env* env, MDB_dbi dbi, MDB_txn **txn, MDB_cursor **cursor,
+		int w, int h, int c);
+/* --- xzl ---- */
+
 float get_color(int c, int x, int max);
 void flip_image(image a);
 void draw_box(image a, int x1, int y1, int x2, int y2, float r, float g, float b);

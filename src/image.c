@@ -1162,13 +1162,64 @@ try_again:
     }
 
     /* leaving @cursor and @txn open for next call */
+	return out;
+}
 
+static image get_image_from_buffer(unsigned char *buf, size_t sz); // xzl
+
+/* similar to above. except assuming the stored images are encoded (eg jpg)
+ * @cursor: in/out. if nullptr, will create a new cursor */
+image db_loadnext_img_encoded(MDB_env* env, MDB_dbi dbi, MDB_txn **txn,
+		MDB_cursor **cursor)
+{
+	xzl_bug_on(!env);
+
+	MDB_val key, v;
+//	MDB_cursor_op op;
+	int rc;
+
+	if (!*txn) {
+		rc = mdb_txn_begin(env, NULL, MDB_RDONLY, txn);
+		if(rc != 0){
+			EE("rc = %d", rc);
+			EE("%s",mdb_strerror(rc));
+		}
+		xzl_bug_on(rc != 0);
+	}
+
+try_again:
+	if (!*cursor) {
+		rc = mdb_cursor_open(*txn, dbi, cursor);
+		xzl_bug_on(rc != 0);
+		rc = mdb_cursor_get(*cursor, &key, &v, MDB_FIRST);
+	} else
+		rc = mdb_cursor_get(*cursor, &key, &v, MDB_NEXT);
+
+	if (rc == MDB_NOTFOUND) {
+		mdb_cursor_close(*cursor);
+		mdb_txn_abort(*txn);
+		return make_empty_image(0, 0, 0); /* nullptr within */
+	}
+
+	if (v.mv_size == sizeof(int)) {
+		I("hit a w/h/c. continue..");
+		goto try_again;
+	}
+
+	I("loaded one k/v. key: %lu, sz %zu data sz %zu",
+		*(uint64_t *)key.mv_data, key.mv_size,
+		v.mv_size);
+
+	image out = get_image_from_buffer(v.mv_data, v.mv_size);
+
+	/* leaving @cursor and @txn open for next call */
 	return out;
 }
 
 #ifdef OPENCV
 
-/* xzl: useful -- conversion */
+/* xzl: converting opencv's image rep (IplImage) to darknet's image rep (image).
+ * useful as example  */
 image ipl_to_image(IplImage* src)
 {
     unsigned char *data = (unsigned char *)src->imageData;
@@ -1221,6 +1272,22 @@ image load_image_cv(char *filename, int channels)
     if (out.c > 1)
         rgbgr_image(out);
     return out;
+}
+
+/* xzl */
+static image get_image_from_buffer(unsigned char *buf, size_t sz)
+{
+	CvMat mat;
+	// Create a Size(1, nSize) Mat object of 8-bit, single-byte elements
+	cvInitMatHeader(&mat, 1, sz, CV_8UC1, buf, CV_AUTOSTEP);
+	IplImage* src = cvDecodeImage(&mat, CV_LOAD_IMAGE_COLOR);
+
+  if (!src) return make_empty_image(0,0,0);
+
+  image out = ipl_to_image(src);
+  if (out.c > 1)		// xzl: do we need this?
+      rgbgr_image(out);
+  return out;
 }
 
 image get_image_from_stream(CvCapture *cap)

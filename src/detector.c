@@ -1246,11 +1246,23 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
     		/* take a db path and open it */
         if (!env) { /* once */
         	db_open(input, &env, &dbi);
-			db_get_geometry(env, dbi, &_w, &_h, &_c);
-			W("db: loaded w/h/c = %d %d %d", _w, _h, _c);
-    	}
+//        	db_get_geometry(env, dbi, &_w, &_h, &_c);  // only useful in loading raw frames
+        	W("db: loaded w/h/c = %d %d %d", _w, _h, _c);
+        }
 
-			image im = db_loadnext_img(env, dbi, &txn, &cursor, _w, _h, _c);
+        // load raw
+//			image im = db_loadnext_img(env, dbi, &txn, &cursor, _w, _h, _c);
+        // load encoded
+        image im = db_loadnext_img_encoded(env, dbi, &txn, &cursor);
+
+        // debugging - write the loaded image back to disk file
+#if 0
+        {
+        	char fname[128];
+        	snprintf(fname, 128, "/root/data/tmp/out-%d.jpg", count);
+        	save_image_jpg(im, fname);
+        }
+#endif
 
 			if (!im.data) { /* nothing loaded. we done. */
 				W("all done");

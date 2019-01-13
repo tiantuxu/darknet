@@ -1270,7 +1270,8 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 						count, (what_time_is_it_now()-start_time),
 						count / (what_time_is_it_now()-start_time));
 
-				if (txn) mdb_txn_abort(txn);	// xzl: why segfault?
+				if (txn)
+					mdb_txn_abort(txn);	// xzl: why segfault?
 				db_close(env, dbi);
 				break;
 		}

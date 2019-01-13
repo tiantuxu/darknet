@@ -1168,6 +1168,7 @@ try_again:
 static image get_image_from_buffer(unsigned char *buf, size_t sz); // xzl
 
 /* similar to above. except assuming the stored images are encoded (eg jpg)
+ * @txn: in/out. will create one if NULL
  * @cursor: in/out. if nullptr, will create a new cursor */
 image db_loadnext_img_encoded(MDB_env* env, MDB_dbi dbi, MDB_txn **txn,
 		MDB_cursor **cursor)
@@ -1198,6 +1199,7 @@ try_again:
 	if (rc == MDB_NOTFOUND) {
 		mdb_cursor_close(*cursor);
 		mdb_txn_abort(*txn);
+		*txn = NULL;
 		return make_empty_image(0, 0, 0); /* nullptr within */
 	}
 

@@ -1,4 +1,7 @@
 # To build db, example commands
+apt update
+apt install liblmdb-dev
+apt install libopencv-*
 
 input=/home/xzl/videos/jackson.mp4
 raw_output=/tmp/input.rgb

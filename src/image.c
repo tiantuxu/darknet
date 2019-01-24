@@ -1037,6 +1037,8 @@ int db_open(const char* db_path, MDB_env** env, MDB_dbi* dbi)
 	xzl_bug_on(rc != 0);
 
 	rc = mdb_env_open(*env, db_path, 0, 0664);
+    if (rc != 0)
+        EE("db path is %s", db_path);
 	xzl_bug_on(rc != 0);
 
 	rc = mdb_txn_begin(*env, NULL, MDB_RDONLY, &txn);

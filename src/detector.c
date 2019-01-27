@@ -1,3 +1,8 @@
+/* xzl */
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include "network.h"
 #include "region_layer.h"
 #include "cost_layer.h"
@@ -1096,7 +1101,7 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
         float anchor_w = anchors_data.centers.vals[cluster_idx][0]; //centers->data.fl[cluster_idx * 2];
         float anchor_h = anchors_data.centers.vals[cluster_idx][1]; //centers->data.fl[cluster_idx * 2 + 1];
         if (best_iou > 1 || best_iou < 0) { // || box_w > width || box_h > height) {
-            printf(" Wrong label: i = %d, box_w = %d, box_h = %d, anchor_w = %d, anchor_h = %d, iou = %f \n",
+            printf(" Wrong label: i = %d, box_w = %f, box_h = %f, anchor_w = %f, anchor_h = %f, iou = %f \n",
                 i, box_w, box_h, anchor_w, anchor_h, best_iou);
         }
         else avg_iou += best_iou;
@@ -1192,12 +1197,15 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
 //#endif // OPENCV
 
 void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh,
-                   float hier_thresh, int dont_show, int ext_output, int save_labels)
+                   float hier_thresh, int dont_show, int ext_output, int save_labels, char* prediction_filename)
 {
     list *options = read_data_cfg(datacfg);
     char *name_list = option_find_str(options, "names", "data/names.list");
     int names_size = 0;
     char **names = get_labels_custom(name_list, &names_size); //get_labels(name_list);
+
+    if (!prediction_filename)
+    	prediction_filename = "predictions";  // default
 
     image **alphabet = load_alphabet();
     network net = parse_network_cfg_custom(cfgfile, 1); // set batch=1
@@ -1223,18 +1231,31 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
     MDB_txn *txn = NULL; /* one transcation for all reads, becuase we iterate with a cursor */
     MDB_cursor *cursor = NULL;
 
-    int _w = -1, _h, _c; /* frame size as loaded from db */
+//    int _w = -1, _h, _c; /* frame size as loaded from db .. needed by raw */
+
     double start_time = what_time_is_it_now(); /* measure total time */
     size_t count = 0;
 
-    while(1){
-        if(filename){ /* xzl: a specific file name is given on cmdline */
-#if 1
-            strncpy(input, filename, 256);
-            if(strlen(input) > 0)
-                if (input[strlen(input) - 1] == 0x0d) input[strlen(input) - 1] = 0;
-#endif
-        } else { /* xzl: no file specified on cmdline */
+    int is_load_img = 1; /* load from single imgs or db? */
+    struct stat path_stat;
+    int rc;
+
+    /* xzl: a specific file name is given on cmdline. a single img or db */
+    if (filename) {
+			strncpy(input, filename, 256); /* xzl: sanitize fname? */
+			if(strlen(input) > 0)
+					if (input[strlen(input) - 1] == 0x0d) input[strlen(input) - 1] = 0;
+
+			rc = stat(input, &path_stat);
+			xzl_bug_on(rc != 0);
+			if (S_ISDIR(path_stat.st_mode))
+				is_load_img = 0; /* we load from db */
+			else
+				xzl_bug_on(!S_ISREG(path_stat.st_mode)); /* must be a reg file */
+    }
+
+    while (1) {
+        if (!filename) { /* xzl: no file specified on cmdline. taking fnames from input */
         		// teddyxu: remove
             /* printf("Enter Image Path: "); */
             fflush(stdout);
@@ -1243,116 +1264,118 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
             strtok(input, "\n");
         }
 
-    		/* take a db path and open it */
-        if (!env) { /* once */
-        	db_open(input, &env, &dbi);
-//        	db_get_geometry(env, dbi, &_w, &_h, &_c);  // only useful in loading raw frames
-        	W("db: loaded w/h/c = %d %d %d", _w, _h, _c);
-        }
+        image im;
 
-        // load raw
-//			image im = db_loadnext_img(env, dbi, &txn, &cursor, _w, _h, _c);
-        // load encoded
-        image im = db_loadnext_img_encoded(env, dbi, &txn, &cursor);
+        if (is_load_img)
+        	im = load_image(input,0,0,net.c); /* xzl: @input: filename */
+        else { /* take a db path and open it */
+					if (!env) { /* once */
+						db_open(input, &env, &dbi);
+	//        	db_get_geometry(env, dbi, &_w, &_h, &_c);  // only useful in loading raw frames
+						W("db: loaded w/h/c = %d %d %d", _w, _h, _c);
+					}
 
-        // debugging - write the loaded image back to disk file
-#if 0
-        {
-        	char fname[128];
-        	snprintf(fname, 128, "/root/data/tmp/out-%d.jpg", count);
-        	save_image_jpg(im, fname);
-        }
+					// load raw
+	//			im = db_loadnext_img(env, dbi, &txn, &cursor, _w, _h, _c);
+					// load encoded
+					im = db_loadnext_img_encoded(env, dbi, &txn, &cursor);
+
+#if 0		// xzl: debugging - write the loaded image back to disk file
+					{
+						char fname[128];
+						snprintf(fname, 128, "/root/data/tmp/out-%d.jpg", count);
+						save_image_jpg(im, fname);
+					}
 #endif
 
-			if (!im.data) { /* nothing loaded. we done. */
-				W("all done");
-				fprintf(stderr, "%lu in %f seconds. fps=%.2f\n",
-						count, (what_time_is_it_now()-start_time),
-						count / (what_time_is_it_now()-start_time));
+				if (!im.data) { /* nothing loaded. we done. */
+					W("all done");
+					fprintf(stderr, "%lu in %f seconds. fps=%.2f\n",
+							count, (what_time_is_it_now()-start_time),
+							count / (what_time_is_it_now()-start_time));
 
-				if (txn)
-					mdb_txn_abort(txn);	// xzl: why segfault?
-				db_close(env, dbi);
-				break;
-		}
+					if (txn)
+						mdb_txn_abort(txn);
+					db_close(env, dbi);
+					break;
+				}
+      }
+			count ++;
 
-		count ++;
+			/* now a new @im is loaded */
 
-#if 0
-        image im = load_image(input,0,0,net.c); /* xzl: @input: filename */
-#endif
+			int letterbox = 0;
+			image sized = resize_image(im, net.w, net.h);
+			//image sized = letterbox_image(im, net.w, net.h); letterbox = 1;
+			layer l = net.layers[net.n-1];
 
-        int letterbox = 0;
-        image sized = resize_image(im, net.w, net.h);
-        //image sized = letterbox_image(im, net.w, net.h); letterbox = 1;
-        layer l = net.layers[net.n-1];
+			//box *boxes = calloc(l.w*l.h*l.n, sizeof(box));
+			//float **probs = calloc(l.w*l.h*l.n, sizeof(float *));
+			//for(j = 0; j < l.w*l.h*l.n; ++j) probs[j] = calloc(l.classes, sizeof(float *));
 
-        //box *boxes = calloc(l.w*l.h*l.n, sizeof(box));
-        //float **probs = calloc(l.w*l.h*l.n, sizeof(float *));
-        //for(j = 0; j < l.w*l.h*l.n; ++j) probs[j] = calloc(l.classes, sizeof(float *));
+			float *X = sized.data;
 
-        float *X = sized.data;
-
-        //time= what_time_is_it_now();
+			//time= what_time_is_it_now();
 //        double time = get_time_point();
-        network_predict(net, X);
-        //network_predict_image(&net, im); letterbox = 1;
-        // xzl:
+			network_predict(net, X);
+			//network_predict_image(&net, im); letterbox = 1;
+			// xzl:
 //        fprintf(stderr, "%s: Predicted in %lf milli-seconds.\n", input, ((double)get_time_point() - time) / 1000);
-        // printf("%s: Predicted in %f seconds.\n", input, (what_time_is_it_now()-time));
-        // printf("%s", input);
-        int nboxes = 0;
-        detection *dets = get_network_boxes(&net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes, letterbox);
-        if (nms) do_nms_sort(dets, nboxes, l.classes, nms);
-        snprintf(input_frame, 256, "%s-%d", input, count); // xzl
-        draw_detections_v3(im, dets, nboxes, thresh, names, alphabet, l.classes, ext_output, input_frame);
-        save_image(im, "predictions");
-        if (!dont_show) {
-            show_image(im, "predictions");
-        }
+			// printf("%s: Predicted in %f seconds.\n", input, (what_time_is_it_now()-time));
+			// printf("%s", input);
+			int nboxes = 0;
+			detection *dets = get_network_boxes(&net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes, letterbox);
+			if (nms) do_nms_sort(dets, nboxes, l.classes, nms);
+			snprintf(input_frame, 256, "%s-%lu", input, count); // xzl
+			draw_detections_v3(im, dets, nboxes, thresh, names, alphabet, l.classes, ext_output, input_frame);
+			save_image(im, prediction_filename);
+			if (!dont_show) {
+					show_image(im, prediction_filename);
+			}
 
-        // pseudo labeling concept - fast.ai
-        if(save_labels)
-        {
-            char labelpath[4096];
-            replace_image_to_label(input, labelpath);
+			// pseudo labeling concept - fast.ai
+			if(save_labels)
+			{
+					char labelpath[4096];
+					replace_image_to_label(input, labelpath);
 
-            FILE* fw = fopen(labelpath, "wb");
-            int i;
-            for (i = 0; i < nboxes; ++i) {
-                char buff[1024];
-                int class_id = -1;
-                float prob = 0;
-                for (j = 0; j < l.classes; ++j) {
-                    if (dets[i].prob[j] > thresh && dets[i].prob[j] > prob) {
-                        prob = dets[i].prob[j];
-                        class_id = j;
-                    }
-                }
-                if (class_id >= 0) {
-                    sprintf(buff, "%d %2.4f %2.4f %2.4f %2.4f\n", class_id, dets[i].bbox.x, dets[i].bbox.y, dets[i].bbox.w, dets[i].bbox.h);
-                    fwrite(buff, sizeof(char), strlen(buff), fw);
-                }
-            }
-            fclose(fw);
-        }
+					FILE* fw = fopen(labelpath, "wb");
+					int i;
+					for (i = 0; i < nboxes; ++i) {
+							char buff[1024];
+							int class_id = -1;
+							float prob = 0;
+							for (j = 0; j < l.classes; ++j) {
+									if (dets[i].prob[j] > thresh && dets[i].prob[j] > prob) {
+											prob = dets[i].prob[j];
+											class_id = j;
+									}
+							}
+							if (class_id >= 0) {
+									sprintf(buff, "%d %2.4f %2.4f %2.4f %2.4f\n", class_id, dets[i].bbox.x, dets[i].bbox.y, dets[i].bbox.w, dets[i].bbox.h);
+									fwrite(buff, sizeof(char), strlen(buff), fw);
+							}
+					}
+					fclose(fw);
+			}
 
-        free_detections(dets, nboxes);
-        free_image(im); /* xzl: reuse this? XXX */
-        free_image(sized);
-        //free(boxes);
-        //free_ptrs((void **)probs, l.w*l.h*l.n);
+			free_detections(dets, nboxes);
+			free_image(im); /* xzl: reuse this? XXX */
+			free_image(sized);
+			//free(boxes);
+			//free_ptrs((void **)probs, l.w*l.h*l.n);
 #ifdef OPENCV
-        if (!dont_show) {
-            cvWaitKey(0);
-            cvDestroyAllWindows();
-        }
+			if (!dont_show) {
+					cvWaitKey(0);
+					cvDestroyAllWindows();
+			}
 #endif
-        /* if (filename) break; */ /* xzl: dont break. go on */
-    }
+      if (filename)
+      	break; /* xzl: single image, we're done*/
+    } // while (1)
 
     // free memory
-    free_ptrs(names, net.layers[net.n - 1].classes);
+    free_ptrs((void **)names, net.layers[net.n - 1].classes);
     free_list_contents_kvp(options);
     free_list(options);
 
@@ -1387,6 +1410,7 @@ void run_detector(int argc, char **argv)
     int num_of_clusters = find_int_arg(argc, argv, "-num_of_clusters", 5);
     int width = find_int_arg(argc, argv, "-width", -1);
     int height = find_int_arg(argc, argv, "-height", -1);
+    char *prediction_filename = find_char_arg(argc, argv, "-prediction_filename", 0); // xzl
     // extended output in test mode (output of rect bound coords)
     // and for recall mode (extended output table-like format with results for best_class fit)
     int ext_output = find_arg(argc, argv, "-ext_output");
@@ -1427,7 +1451,7 @@ void run_detector(int argc, char **argv)
         if(strlen(weights) > 0)
             if (weights[strlen(weights) - 1] == 0x0d) weights[strlen(weights) - 1] = 0;
     char *filename = (argc > 6) ? argv[6]: 0;
-    if(0==strcmp(argv[2], "test")) test_detector(datacfg, cfg, weights, filename, thresh, hier_thresh, dont_show, ext_output, save_labels);
+    if(0==strcmp(argv[2], "test")) test_detector(datacfg, cfg, weights, filename, thresh, hier_thresh, dont_show, ext_output, save_labels, prediction_filename);
     else if(0==strcmp(argv[2], "train")) train_detector(datacfg, cfg, weights, gpus, ngpus, clear, dont_show, calc_map);
     else if(0==strcmp(argv[2], "valid")) validate_detector(datacfg, cfg, weights, outfile);
     else if(0==strcmp(argv[2], "recall")) validate_detector_recall(datacfg, cfg, weights);

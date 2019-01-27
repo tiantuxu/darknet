@@ -28,7 +28,8 @@ void db_close(MDB_env* env, MDB_dbi dbi);
 void db_get_geometry(MDB_env* env, MDB_dbi dbi, int *w, int *h, int *c);
 image db_loadnext_img(MDB_env* env, MDB_dbi dbi, MDB_txn **txn, MDB_cursor **cursor,
 		int w, int h, int c);
-image db_loadnext_img_encoded(MDB_env* env, MDB_dbi dbi, MDB_txn **txn, MDB_cursor **cursor);
+image db_loadnext_img_encoded(MDB_env* env, MDB_dbi dbi, MDB_txn **txn,
+		MDB_cursor **cursor, int step, size_t *imgid);
 /* --- xzl ---- */
 
 float get_color(int c, int x, int max);

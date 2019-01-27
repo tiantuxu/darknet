@@ -1173,7 +1173,7 @@ static image get_image_from_buffer(unsigned char *buf, size_t sz); // xzl
  * @txn: in/out. will create one if NULL
  * @cursor: in/out. if nullptr, will create a new cursor */
 image db_loadnext_img_encoded(MDB_env* env, MDB_dbi dbi, MDB_txn **txn,
-		MDB_cursor **cursor)
+		MDB_cursor **cursor, int step, size_t *img_id)
 {
 	xzl_bug_on(!env);
 
@@ -1195,9 +1195,16 @@ try_again:
 		rc = mdb_cursor_open(*txn, dbi, cursor);
 		xzl_bug_on(rc != 0);
 		rc = mdb_cursor_get(*cursor, &key, &v, MDB_FIRST);
-	} else
+	} else {
+		for (int i = 0; i < step - 1; i++) { /* advance cursor w/o reading */
+			rc = mdb_cursor_get(*cursor, &key, NULL, MDB_NEXT);
+			if (rc == MDB_NOTFOUND)
+				goto no_found;
+		}
 		rc = mdb_cursor_get(*cursor, &key, &v, MDB_NEXT);
+	}
 
+no_found:
 	if (rc == MDB_NOTFOUND) {
 		mdb_cursor_close(*cursor);
 		mdb_txn_abort(*txn);
@@ -1215,6 +1222,8 @@ try_again:
 		v.mv_size);
 
 	image out = get_image_from_buffer(v.mv_data, v.mv_size);
+	if (img_id)
+		*img_id = *(size_t *)key.mv_data;
 
 	/* leaving @cursor and @txn open for next call */
 	return out;

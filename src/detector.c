@@ -2,6 +2,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#define _GNU_SOURCE         /* See feature_test_macros(7) */
+#include <libgen.h>
+#include <string.h>
 
 #include "network.h"
 #include "region_layer.h"
@@ -1196,16 +1199,18 @@ void calc_anchors(char *datacfg, int num_of_clusters, int width, int height, int
 //}
 //#endif // OPENCV
 
-void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filename, float thresh,
-                   float hier_thresh, int dont_show, int ext_output, int save_labels, char* prediction_filename)
+void test_detector(char *datacfg, char *cfgfile, char *weightfile,
+		char *filename, float thresh, float hier_thresh, int dont_show,
+		int ext_output, int save_labels, char* prediction_filename_prefix,
+		int n_db_smaples)
 {
     list *options = read_data_cfg(datacfg);
     char *name_list = option_find_str(options, "names", "data/names.list");
     int names_size = 0;
     char **names = get_labels_custom(name_list, &names_size); //get_labels(name_list);
 
-    if (!prediction_filename)
-    	prediction_filename = "predictions";  // default
+    if (!prediction_filename_prefix)
+    	prediction_filename_prefix = "predictions";  // default
 
     image **alphabet = load_alphabet();
     network net = parse_network_cfg_custom(cfgfile, 1); // set batch=1
@@ -1221,7 +1226,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         if(net.layers[net.n - 1].classes > names_size) getchar();
     }
     srand(2222222);
-    char buff[256], buff1[256];
+    char buff[256], buff1[256], prediction_filename[256];
     char *input = buff, *input_frame = buff1;
     int j;
     float nms=.45;    // 0.4F
@@ -1254,8 +1259,47 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 				xzl_bug_on(!S_ISREG(path_stat.st_mode)); /* must be a reg file */
     }
 
+    /* determine db load steps */
+    int db_sample_step = 1;
+    if (!is_load_img && n_db_smaples != INT_MAX) {
+    	MDB_val key, data;
+    	size_t first_id, last_id;
+
+    	db_open(input, &env, &dbi);
+
+    	rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+			xzl_bug_on(rc != 0);
+
+			rc = mdb_dbi_open(txn, NULL, MDB_INTEGERKEY, &dbi);
+			xzl_bug_on(rc != 0);
+
+			rc = mdb_cursor_open(txn, dbi, &cursor);
+			xzl_bug_on(rc != 0);
+
+			rc = mdb_cursor_get(cursor, &key, &data, MDB_FIRST);
+			if (rc == MDB_NOTFOUND)
+				return; /* nothing */
+
+			first_id = *(size_t *)key.mv_data;
+
+			rc = mdb_cursor_get(cursor, &key, &data, MDB_LAST);
+			if (rc == MDB_NOTFOUND)
+				return; /* nothing */
+
+			last_id = *(size_t *)key.mv_data;
+
+			I("first id %lu -- last id %lu", first_id, last_id);
+			xzl_assert(last_id > first_id);
+
+			db_sample_step = (last_id - first_id) / n_db_smaples;
+
+			mdb_cursor_close(cursor);
+			mdb_txn_abort(txn);
+			cursor = NULL; txn = NULL;
+    }
+
     while (1) {
-        if (!filename) { /* xzl: no file specified on cmdline. taking fnames from input */
+        if (!filename) { /* xzl: no file specified. keep taking fnames from input */
         		// teddyxu: remove
             /* printf("Enter Image Path: "); */
             fflush(stdout);
@@ -1265,6 +1309,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
         }
 
         image im;
+        size_t imgid; /* loaded from db */
 
         if (is_load_img)
         	im = load_image(input,0,0,net.c); /* xzl: @input: filename */
@@ -1272,13 +1317,14 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 					if (!env) { /* once */
 						db_open(input, &env, &dbi);
 	//        	db_get_geometry(env, dbi, &_w, &_h, &_c);  // only useful in loading raw frames
-						W("db: loaded w/h/c = %d %d %d", _w, _h, _c);
+//						W("db: loaded w/h/c = %d %d %d", _w, _h, _c);
 					}
 
 					// load raw
 	//			im = db_loadnext_img(env, dbi, &txn, &cursor, _w, _h, _c);
 					// load encoded
-					im = db_loadnext_img_encoded(env, dbi, &txn, &cursor);
+					im = db_loadnext_img_encoded(env, dbi, &txn, &cursor,
+							db_sample_step, &imgid);
 
 #if 0		// xzl: debugging - write the loaded image back to disk file
 					{
@@ -1326,8 +1372,25 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 			int nboxes = 0;
 			detection *dets = get_network_boxes(&net, im.w, im.h, thresh, hier_thresh, 0, 1, &nboxes, letterbox);
 			if (nms) do_nms_sort(dets, nboxes, l.classes, nms);
-			snprintf(input_frame, 256, "%s-%lu", input, count); // xzl
+			snprintf(input_frame, 256, "%s-%lu", input, count); // xzl. @input_frame is for console output
 			draw_detections_v3(im, dets, nboxes, thresh, names, alphabet, l.classes, ext_output, input_frame);
+
+			if (is_load_img) {
+				char *oname, *bname;
+				oname = strdup(input);
+				xzl_bug_on(!oname);
+				bname = basename(oname);
+				char *dot = rindex(bname, '.'); *dot = '\0';
+				snprintf(prediction_filename, 256, "%s-%s", prediction_filename_prefix,
+						bname);
+				free(oname);
+			} else {
+				snprintf(prediction_filename, 256, "%s-%lu", prediction_filename_prefix,
+										imgid);
+			}
+
+			EE("===> save prediction image %s", prediction_filename);
+
 			save_image(im, prediction_filename);
 			if (!dont_show) {
 					show_image(im, prediction_filename);
@@ -1370,7 +1433,7 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile, char *filenam
 					cvDestroyAllWindows();
 			}
 #endif
-      if (filename)
+      if (filename && is_load_img)
       	break; /* xzl: single image, we're done*/
     } // while (1)
 
@@ -1410,7 +1473,10 @@ void run_detector(int argc, char **argv)
     int num_of_clusters = find_int_arg(argc, argv, "-num_of_clusters", 5);
     int width = find_int_arg(argc, argv, "-width", -1);
     int height = find_int_arg(argc, argv, "-height", -1);
-    char *prediction_filename = find_char_arg(argc, argv, "-prediction_filename", 0); // xzl
+    // xzl
+    char *prediction_filename = find_char_arg(argc, argv, "-prediction_filename", 0);
+    int n_db_smaples = find_int_arg(argc, argv, "-n_db_samples", INT_MAX);
+
     // extended output in test mode (output of rect bound coords)
     // and for recall mode (extended output table-like format with results for best_class fit)
     int ext_output = find_arg(argc, argv, "-ext_output");
@@ -1451,7 +1517,9 @@ void run_detector(int argc, char **argv)
         if(strlen(weights) > 0)
             if (weights[strlen(weights) - 1] == 0x0d) weights[strlen(weights) - 1] = 0;
     char *filename = (argc > 6) ? argv[6]: 0;
-    if(0==strcmp(argv[2], "test")) test_detector(datacfg, cfg, weights, filename, thresh, hier_thresh, dont_show, ext_output, save_labels, prediction_filename);
+    if(0==strcmp(argv[2], "test")) test_detector(datacfg, cfg, weights,
+    		filename, thresh, hier_thresh, dont_show, ext_output, save_labels,
+    		prediction_filename, n_db_smaples);
     else if(0==strcmp(argv[2], "train")) train_detector(datacfg, cfg, weights, gpus, ngpus, clear, dont_show, calc_map);
     else if(0==strcmp(argv[2], "valid")) validate_detector(datacfg, cfg, weights, outfile);
     else if(0==strcmp(argv[2], "recall")) validate_detector_recall(datacfg, cfg, weights);

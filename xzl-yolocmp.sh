@@ -85,14 +85,19 @@ done
 # add text
 # convert -font helvetica -fill blue -pointsize 36 -draw "text 15,50 '$TEXT'" image1.jpg image2.jpg
 
-# XXX very ad hoc
+# XXX stitch very ad hoc
 for f in ${resdir}/yolov2-*.jpg; do
     b=`basename $f .jpg`
     id=$(echo $b | sed 's/yolov2-//g')
     echo "combine results for $id"     # e.g. 181
-    convert yolov2-$id.jpg yolov3tiny-$id.jpg +append combined-$id.jpg
+    convert ${resdir}/yolov2-$id.jpg ${resdir}/yolov3tiny-$id.jpg +append ${resdir}/combined-$id.jpg
 done
 
-xdg-open ${resdir} &
+# XXX clean images? 
+for m in yolov2 yolov3tiny; do
+    rm -f ${resdir}/$m-*.jpg; 
+done
+
+# xdg-open ${resdir} &
 
 

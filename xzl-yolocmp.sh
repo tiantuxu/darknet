@@ -68,12 +68,30 @@ ${img} \
     -n_db_samples $N \
     ${dbdir}
     
+
+# add annotation 
+for m in yolov2 yolov3tiny; do
+    for f in ${resdir}/$m-*.jpg; do
+        echo "annotate $f"
+        convert -font helvetica -fill yellow -pointsize 36 -draw "text 15,50 '$m'" $f $f.out
+        mv -f $f.out $f # overwrite the old one
+    done
+done
+
 # stitich them ...
 # https://stackoverflow.com/questions/20075087/how-to-merge-images-in-command-line
 # convert image1.png image2.png image3.png -append result/result-sprite.png
 # convert yolov2-1.jpg yolov3tiny-1.jpg -append result.jpg
 # add text
 # convert -font helvetica -fill blue -pointsize 36 -draw "text 15,50 '$TEXT'" image1.jpg image2.jpg
+
+# XXX very ad hoc
+for f in ${resdir}/yolov2-*.jpg; do
+    b=`basename $f .jpg`
+    id=$(echo $b | sed 's/yolov2-//g')
+    echo "combine results for $id"     # e.g. 181
+    convert yolov2-$id.jpg yolov3tiny-$id.jpg +append combined-$id.jpg
+done
 
 xdg-open ${resdir} &
 

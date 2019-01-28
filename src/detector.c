@@ -1252,6 +1252,8 @@ void test_detector(char *datacfg, char *cfgfile, char *weightfile,
 					if (input[strlen(input) - 1] == 0x0d) input[strlen(input) - 1] = 0;
 
 			rc = stat(input, &path_stat);
+            if (rc)
+                EE("%s does not exist?", input);
 			xzl_bug_on(rc != 0);
 			if (S_ISDIR(path_stat.st_mode))
 				is_load_img = 0; /* we load from db */

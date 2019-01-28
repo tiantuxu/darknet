@@ -78,12 +78,13 @@ r detector test cfg/coco.data cfg/yolov3.cfg yolov3.weights \
 
 
 
-
-img=jcjimenez/darknet-docker:gpu-latest
+# launch docker. use this to compile 
+#img=jcjimenez/darknet-docker:gpu-latest
+img=xzl-darknet:latest
 docker run \
     --runtime=nvidia \
-    -it \
-    --volume /home/xzl/videos:/root/videos \
+    -it --rm \
+    --volume /data/videos:/data/videos \
     --volume /home/xzl/darknet-tiantu/:/root/darknet-tiantu \
     --volume /media/xzl/WD-BLK-1TB/:/root/WD-BLK-1TB \
     ${img} \
